@@ -14,6 +14,12 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Allow requests for static assets (images, fonts, css, js) by checking for
+  // a file extension in the pathname — these should not be redirected to login.
+  if (pathname.match(/\.[^/]+$/)) {
+    return NextResponse.next();
+  }
+
   // Allow login page and assets
   if (pathname === "/login" || pathname.startsWith("/login/")) {
     return NextResponse.next();
