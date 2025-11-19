@@ -75,9 +75,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${origin}/?oauth_error=${encodeURIComponent(detail)}`);
   }
 
-  // WARNING: returning access_token in the URL query is insecure and only intended
-  // for quick local testing / debugging. For production, store tokens server-side
-  // and use secure, HttpOnly cookies or a session.
+  // Store access token in an HttpOnly cookie (safer). For production you should
+  // also store the refresh token securely and rotate tokens as needed.
   const accessToken = tokens.access_token;
-  return NextResponse.redirect(`${origin}/?access_token=${encodeURIComponent(accessToken)}`);
+  const expiresIn = tokens.expires_in || 3600;
+  const secure = process.env.NODE_ENV === "production";
+
+  const cookie = `access_token=${encodeURIComponent(accessToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${expiresIn}; ${
+    secure ? "Secure;" : ""
+  }`;
+
+  return NextResponse.redirect(`${origin}/`, {
+    headers: {
+      "Set-Cookie": cookie,
+    },
+  });
 }
