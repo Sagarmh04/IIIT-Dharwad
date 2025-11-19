@@ -26,12 +26,19 @@ export function middleware(req: NextRequest) {
   }
 
   const token = req.cookies.get("access_token")?.value;
+  
+  // Debug logging
+  console.log("Middleware check for:", pathname);
+  console.log("Has access_token:", !!token);
+  
   if (!token) {
+    console.log("No token, redirecting to login");
     const loginUrl = new URL("/login", req.nextUrl.origin);
     loginUrl.searchParams.set("from", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
+  console.log("Token found, allowing access");
   return NextResponse.next();
 }
 

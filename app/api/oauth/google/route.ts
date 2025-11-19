@@ -35,7 +35,15 @@ export async function GET(req: NextRequest) {
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set(
       "scope",
-      ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"].join(" ")
+      [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.modify"
+      ].join(" ")
     );
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
@@ -75,19 +83,37 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${origin}/?oauth_error=${encodeURIComponent(detail)}`);
   }
 
-  // Store access token in an HttpOnly cookie (safer). For production you should
-  // also store the refresh token securely and rotate tokens as needed.
+  // Store access token and refresh token in HttpOnly cookies
   const accessToken = tokens.access_token;
+  const refreshToken = tokens.refresh_token;
   const expiresIn = tokens.expires_in || 3600;
-  const secure = process.env.NODE_ENV === "production";
 
-  const cookie = `access_token=${encodeURIComponent(accessToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${expiresIn}; ${
-    secure ? "Secure;" : ""
-  }`;
+  console.log("Setting cookies - access_token exists:", !!accessToken);
+  console.log("Setting cookies - refresh_token exists:", !!refreshToken);
 
-  return NextResponse.redirect(`${origin}/`, {
-    headers: {
-      "Set-Cookie": cookie,
-    },
+  const response = NextResponse.redirect(`${origin}/`);
+  
+  // Set access token cookie - force httpOnly false for debugging
+  response.cookies.set("access_token", accessToken, {
+    httpOnly: true,
+    secure: false, // Disable secure for localhost
+    sameSite: "lax",
+    maxAge: expiresIn,
+    path: "/",
   });
+
+  // Set refresh token cookie if provided
+  if (refreshToken) {
+    response.cookies.set("refresh_token", refreshToken, {
+      httpOnly: true,
+      secure: false, // Disable secure for localhost
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      path: "/",
+    });
+  }
+
+  console.log("Cookies set, redirecting to:", `${origin}/`);
+
+  return response;
 }
