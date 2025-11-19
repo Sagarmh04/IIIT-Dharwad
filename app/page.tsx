@@ -1,65 +1,159 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useEffect } from "react";
+
+/**
+ * Environment configuration notes:
+ * - For quick local testing you can paste your OAuth credentials below.
+ * - DO NOT commit client secrets to source control. This is insecure.
+ * - Recommended: perform the token exchange on a server (Next.js API route).
+ *
+ * Make sure in Google Cloud Console you created an OAuth 2.0 Client ID of type
+ * "Web application" and added the redirect URI (for example `http://localhost:3000`).
+ */
+
+const FALLBACK_CLIENT_ID = "PASTE_YOUR_CLIENT_ID_HERE"; // e.g. xxxxx.apps.googleusercontent.com
+const FALLBACK_CLIENT_SECRET = "PASTE_YOUR_CLIENT_SECRET_HERE"; // for local testing only
+
+const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || FALLBACK_CLIENT_ID;
+const CLIENT_SECRET = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET || FALLBACK_CLIENT_SECRET;
+const REDIRECT_URI = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI || "http://localhost:3000";
+
+const GMAIL_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "openid",
+].join(" ");
+
+export default function HomePage() {
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [emails, setEmails] = useState<{ id: string; subject: string }[]>([]);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Extract `access_token` from redirect query (set by server route)
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get("access_token");
+    const oauthError = url.searchParams.get("oauth_error");
+    if (oauthError) {
+      setErrorMsg(oauthError);
+      url.searchParams.delete("oauth_error");
+      window.history.replaceState({}, "", url.toString());
+      return;
+    }
+
+    if (token) {
+      setAccessToken(token);
+      url.searchParams.delete("access_token");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, []);
+
+  // Fetch last 20 email subjects
+  useEffect(() => {
+    if (!accessToken) return;
+
+    async function fetchEmails() {
+        try {
+        const listRes = await fetch(
+          "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20",
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          }
+        );
+
+        const listData = await listRes.json();
+          if (!listRes.ok) {
+            setErrorMsg(`Gmail list error: ${listData.error?.message || JSON.stringify(listData)}`);
+            console.error("Gmail list error:", listData);
+            return;
+          }
+        if (!listData.messages) return;
+
+        const detailed = await Promise.all(
+          listData.messages.map(async (msg: any) => {
+            const detailRes = await fetch(
+              `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=Subject`,
+              {
+                headers: { Authorization: `Bearer ${accessToken}` },
+              }
+            );
+            if (!detailRes.ok) {
+              const errBody = await detailRes.text();
+              console.error("Message detail fetch error:", errBody);
+              return { id: msg.id, subject: "(failed to fetch)" };
+            }
+            const detail = await detailRes.json();
+
+            let subject = "No Subject";
+            const headers = detail?.payload?.headers || [];
+            const sub = headers.find((h: any) => h.name === "Subject");
+            if (sub) subject = sub.value;
+
+            return { id: msg.id, subject };
+          })
+        );
+
+        setEmails(detailed);
+      } catch (error) {
+        console.error("Error fetching emails:", error);
+      }
+    }
+
+    fetchEmails();
+  }, [accessToken]);
+
+  function handleLogin() {
+    // Use server-side OAuth entrypoint which initiates the Google auth and
+    // performs the token exchange server-side. The server will redirect back
+    // with `?access_token=...` (quick local testing). Recommended: server
+    // should store tokens and set a secure cookie instead of exposing tokens.
+    window.location.href = "/api/oauth/google";
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="p-6 max-w-2xl mx-auto">
+      <h1 className="text-3xl font-bold mb-6">Gmail API Test Page</h1>
+
+      {!accessToken && (
+        <button
+          onClick={handleLogin}
+          className="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700"
+        >
+          Login with Google (Gmail Access)
+        </button>
+      )}
+
+      {accessToken && (
+        <div className="mt-6">
+          <h2 className="text-xl font-semibold mb-4">Last 20 Emails</h2>
+          {emails.length === 0 && <p>Loading…</p>}
+
+          <ul className="space-y-3">
+            {emails.map((email) => (
+              <li
+                key={email.id}
+                className="p-3 border rounded bg-gray-50 text-sm"
+              >
+                {email.subject}
+              </li>
+            ))}
+          </ul>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      )}
+      {errorMsg && (
+        <div className="mt-4 p-3 border rounded bg-red-50 text-red-800 text-sm">
+          <strong>Error:</strong> {errorMsg}
+          <div className="mt-2 text-xs text-gray-600">
+            Common causes: wrong client ID/secret, missing redirect URI in Google Cloud
+            Console, or using the wrong OAuth client type. For production, move the
+            token exchange to a server-side endpoint so the client secret isn't exposed.
+          </div>
         </div>
-      </main>
+      )}
     </div>
   );
 }
+
+
+

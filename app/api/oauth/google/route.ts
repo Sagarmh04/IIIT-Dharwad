@@ -1,86 +1,83 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
-const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI!;
-// For local dev, this will usually be: http://localhost:3000/api/oauth/google
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+// Optional env; if not provided we'll default to the runtime origin + this route
+// (e.g. http://localhost:3000/api/oauth/google). Register that exact URI in
+// Google Cloud Console as an authorized redirect URI.
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
 
+// STEP 1 & 2 in one endpoint (for demo)
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
+  const error = url.searchParams.get("error");
 
-  // 1️⃣ No code yet → redirect user to Google OAuth consent screen
+  // If Google sent an error
+  if (error) {
+    console.error("Google OAuth error:", error);
+    return NextResponse.redirect("/login?error=google_oauth");
+  }
+
+  // Step 1: No code yet -> redirect user to Google
   if (!code) {
-    const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    if (!GOOGLE_CLIENT_ID) {
+      console.error("Missing GOOGLE_CLIENT_ID env var");
+      return NextResponse.json({ error: "Missing Google client ID on server" }, { status: 500 });
+    }
 
+    const origin = req.nextUrl.origin;
+    const redirectUri = GOOGLE_REDIRECT_URI || `${origin}/api/oauth/google`;
+
+    const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     authUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID);
-    authUrl.searchParams.set("redirect_uri", GOOGLE_REDIRECT_URI);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set(
       "scope",
-      [
-        "openid",
-        "email",
-        "profile",
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/gmail.send",
-      ].join(" ")
+      ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"].join(" ")
     );
-    authUrl.searchParams.set("access_type", "offline"); // to get refresh_token
-    authUrl.searchParams.set("prompt", "consent"); // force consent to always get refresh_token
+    authUrl.searchParams.set("access_type", "offline");
+    authUrl.searchParams.set("prompt", "consent");
 
     return NextResponse.redirect(authUrl.toString());
   }
 
-  // 2️⃣ We have ?code=... → exchange it for tokens
-  const params = new URLSearchParams({
+  // Step 2: Got ?code=... -> exchange for tokens
+  const origin = req.nextUrl.origin;
+  const redirectUri = GOOGLE_REDIRECT_URI || `${origin}/api/oauth/google`;
+
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    console.error("Missing Google client credentials on server");
+    return NextResponse.json({ error: "Missing Google client credentials on server" }, { status: 500 });
+  }
+
+  const body = new URLSearchParams({
     code,
     client_id: GOOGLE_CLIENT_ID,
     client_secret: GOOGLE_CLIENT_SECRET,
-    redirect_uri: GOOGLE_REDIRECT_URI,
+    redirect_uri: redirectUri,
     grant_type: "authorization_code",
   });
 
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
+    body,
   });
 
-  const tokenJson = await tokenRes.json();
+  const tokens = await tokenRes.json();
+  console.log("Google tokens:", tokens);
 
   if (!tokenRes.ok) {
-    console.error("Google token error:", tokenJson);
-    return NextResponse.json(
-      { error: "Failed to exchange code for tokens", details: tokenJson },
-      { status: 400 }
-    );
+    // Redirect back with error details for easier debugging locally
+    const detail = tokens.error_description || tokens.error || JSON.stringify(tokens);
+    return NextResponse.redirect(`${origin}/?oauth_error=${encodeURIComponent(detail)}`);
   }
 
-  const {
-    access_token,
-    refresh_token,
-    expires_in,
-    id_token,
-    scope,
-    token_type,
-  } = tokenJson;
-
-  // 3️⃣ TODO: save refresh_token somewhere secure (DB) and create a session
-  // For now, we'll just log it and redirect to /inbox
-  console.log("Gmail OAuth tokens:", {
-    access_token,
-    refresh_token,
-    expires_in,
-    id_token,
-    scope,
-    token_type,
-  });
-
-  // Later you can:
-  // - Create a user in DB if not exists
-  // - Store refresh_token in DB (encrypted)
-  // - Set a cookie/JWT for the session
-
-  return NextResponse.redirect("/inbox");
+  // WARNING: returning access_token in the URL query is insecure and only intended
+  // for quick local testing / debugging. For production, store tokens server-side
+  // and use secure, HttpOnly cookies or a session.
+  const accessToken = tokens.access_token;
+  return NextResponse.redirect(`${origin}/?access_token=${encodeURIComponent(accessToken)}`);
 }
