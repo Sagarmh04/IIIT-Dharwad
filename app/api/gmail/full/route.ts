@@ -29,18 +29,18 @@ export async function GET(req: NextRequest) {
     // Extract headers
     const headers = message.payload?.headers || [];
     const getHeader = (name: string) => {
-      const header = headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase());
+      const header = headers.find((h: { name: string; value: string }) => h.name.toLowerCase() === name.toLowerCase());
       return header?.value || "";
     };
 
     // Extract body
     let body = "";
-    const extractBody = (part: any): string => {
+    const extractBody = (part: { body?: { data?: string }; parts?: unknown[] }): string => {
       if (part.body?.data) {
         return Buffer.from(part.body.data, "base64").toString("utf-8");
       }
       if (part.parts) {
-        return part.parts.map(extractBody).join("\n");
+        return part.parts.map((p) => extractBody(p as { body?: { data?: string }; parts?: unknown[] })).join("\n");
       }
       return "";
     };

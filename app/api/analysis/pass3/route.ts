@@ -55,10 +55,11 @@ Focus on:
     const semanticContext = JSON.parse(completion.choices[0].message.content || "{}");
 
     return NextResponse.json(semanticContext);
-  } catch (err: any) {
+  } catch (err) {
     console.error("Pass3 analysis error:", err);
+    const errorMessage = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(
-      { error: "Analysis failed", detail: err.message },
+      { error: "Analysis failed", detail: errorMessage },
       { status: 500 }
     );
   }

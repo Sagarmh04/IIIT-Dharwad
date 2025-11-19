@@ -52,10 +52,11 @@ Check for:
     const analysis = JSON.parse(completion.choices[0].message.content || "{}");
 
     return NextResponse.json(analysis);
-  } catch (err: any) {
+  } catch (err) {
     console.error("Pass2 analysis error:", err);
+    const errorMessage = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(
-      { error: "Analysis failed", detail: err.message },
+      { error: "Analysis failed", detail: errorMessage },
       { status: 500 }
     );
   }

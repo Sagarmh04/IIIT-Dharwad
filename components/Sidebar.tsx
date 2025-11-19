@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-
 interface SidebarProps {
   onSync: () => void;
   syncing: boolean;
@@ -10,7 +8,11 @@ interface SidebarProps {
     urgency?: string;
     category?: string;
   };
-  onFilterChange: (filters: any) => void;
+  onFilterChange: (filters: {
+    sentiment?: string;
+    urgency?: string;
+    category?: string;
+  }) => void;
 }
 
 export default function Sidebar({ onSync, syncing, filters, onFilterChange }: SidebarProps) {

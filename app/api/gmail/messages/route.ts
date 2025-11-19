@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     const messages = listData.messages || [];
 
     const detailed = await Promise.all(
-      messages.map(async (msg: any) => {
+      messages.map(async (msg: { id: string }) => {
         try {
           const detailRes = await fetch(
             `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=Subject`,
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
           }
           const detail = await detailRes.json();
           const headers = detail?.payload?.headers || [];
-          const sub = headers.find((h: any) => h.name === "Subject");
+          const sub = headers.find((h: { name: string; value: string }) => h.name === "Subject");
           return { id: msg.id, subject: sub?.value || "(no subject)" };
         } catch (err) {
           console.error(err);

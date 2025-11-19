@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { collection, doc, setDoc, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { EmailMessage } from "@/lib/types";
 import Sidebar from "@/components/Sidebar";
@@ -14,7 +14,11 @@ export default function HomePage() {
   const [emails, setEmails] = useState<EmailMessage[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [filters, setFilters] = useState<any>({});
+  const [filters, setFilters] = useState<{
+    sentiment?: string;
+    urgency?: string;
+    category?: string;
+  }>({});
   const [loading, setLoading] = useState(true);
 
   // Fetch user
@@ -78,7 +82,7 @@ export default function HomePage() {
       for (let i = 0; i < messages.length; i += BATCH_SIZE) {
         const batch = messages.slice(i, i + BATCH_SIZE);
         
-        await Promise.all(batch.map(async (msg: any) => {
+        await Promise.all(batch.map(async (msg: { id: string }) => {
           const messageId = msg.id;
           
           // Check if already exists in Firestore
