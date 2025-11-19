@@ -1,27 +1,17 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
 import { collection, getDocs } from "firebase/firestore";
+import { useUser } from "@/lib/UserContext";
 
 export default function SearchPage() {
   const router = useRouter();
+  const { user } = useUser();
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<any[]>([]);
-  const [user, setUser] = useState<{ email: string } | null>(null);
-
-  useEffect(() => {
-    async function fetchUser() {
-      const res = await fetch("/api/user");
-      if (res.ok) {
-        const userData = await res.json();
-        setUser(userData);
-      }
-    }
-    fetchUser();
-  }, []);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
+import { useUser } from "@/lib/UserContext";
 import {
   collection,
   doc,
@@ -44,34 +45,16 @@ type EmailMeta = {
 
 export default function HomePage() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
+  const { user, loading: userLoading } = useUser();
   const [emails, setEmails] = useState<EmailMeta[]>([]);
   const [filteredEmails, setFilteredEmails] = useState<EmailMeta[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<EmailMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [analyzingEmail, setAnalyzingEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<any>({});
   const [stats, setStats] = useState<any>({});
-
-  // Fetch user
-  useEffect(() => {
-    async function fetchUser() {
-      try {
-        const res = await fetch("/api/user");
-        if (res.ok) {
-          const userData = await res.json();
-          setUser(userData);
-        } else {
-          router.push("/login");
-        }
-      } catch (err) {
-        console.error("Failed to fetch user:", err);
-        router.push("/login");
-      }
-    }
-    fetchUser();
-  }, [router]);
 
   // Real-time listener for emails
   useEffect(() => {
@@ -168,7 +151,7 @@ export default function HomePage() {
     setStats({ analyzed, highPriority, compliance, pii });
   }
 
-  // Sync Gmail: Fetch emails and run Pass 1
+  // Unified Sync: One API call handles everything
   async function handleSync() {
     if (!user) {
       setError("Not signed in.");
@@ -179,88 +162,29 @@ export default function HomePage() {
     setError(null);
 
     try {
-      // Step 1: Fetch email IDs
-      const res = await fetch("/api/gmail/messages");
+      // ONE call to the server - it handles Gmail fetch + Firestore storage
+      const res = await fetch("/api/sync", { method: "POST" });
+      
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error(txt || `Server returned ${res.status}`);
+        throw new Error(txt || "Sync failed");
       }
+      
       const data = await res.json();
-      const msgs = data.messages || [];
+      console.log(`Synced ${data.count} emails`);
 
-      // Step 2: Fetch and store emails (limit to 10 to avoid overwhelming)
-      const emailsToAnalyze: any[] = [];
-      const messagesToFetch = msgs.slice(0, 10);
-
-      for (const m of messagesToFetch) {
-        try {
-          const fullRes = await fetch(`/api/gmail/full?messageId=${m.id}`);
-          if (fullRes.ok) {
-            const fullEmail = await fullRes.json();
-            
-            // Save to Firestore
-            const docRef = doc(db, `users/${user.email}/emails`, fullEmail.messageId);
-            const emailDoc = await getDocs(
-              query(
-                collection(db, `users/${user.email}/emails`),
-                where("messageId", "==", fullEmail.messageId)
-              )
-            );
-
-            const existingData = emailDoc.empty ? null : emailDoc.docs[0].data();
-            
-            await setDoc(
-              docRef,
-              {
-                ...fullEmail,
-                createdAt: serverTimestamp(),
-              },
-              { merge: true }
-            );
-
-            // Queue for analysis if not already analyzed
-            if (!existingData?.quickAnalysis) {
-              emailsToAnalyze.push(fullEmail);
-            }
-          }
-        } catch (err) {
-          console.error("Error fetching email:", err);
+      // Save emails to Firestore from client
+      if (data.emails && Array.isArray(data.emails)) {
+        for (const email of data.emails) {
+          const docRef = doc(db, `users/${user.email}/emails`, email.messageId);
+          await setDoc(docRef, {
+            ...email,
+            createdAt: serverTimestamp(),
+          }, { merge: true });
         }
-      }
 
-      // Step 3: Run Pass 1 in small batches to avoid rate limits
-      if (emailsToAnalyze.length > 0) {
-        // Process 2 at a time with delay
-        for (let i = 0; i < emailsToAnalyze.length; i += 2) {
-          const batch = emailsToAnalyze.slice(i, i + 2);
-          
-          try {
-            const pass1Res = await fetch("/api/analysis/pass1", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ emails: batch }),
-            });
-
-            if (pass1Res.ok) {
-              const pass1Data = await pass1Res.json();
-              
-              // Update Firestore with quickAnalysis
-              for (const result of pass1Data.results || []) {
-                if (result.quickAnalysis) {
-                  const docRef = doc(db, `users/${user.email}/emails`, result.messageId);
-                  await setDoc(docRef, { quickAnalysis: result.quickAnalysis }, { merge: true });
-                }
-              }
-            }
-            
-            // Wait 1 second between batches to respect rate limits
-            if (i + 2 < emailsToAnalyze.length) {
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-          } catch (err) {
-            console.error("Pass1 batch error:", err);
-          }
-        }
+        // Trigger background analysis for new emails (non-blocking)
+        triggerBackgroundAnalysis(data.emails);
       }
 
       setSyncing(false);
@@ -271,55 +195,100 @@ export default function HomePage() {
     }
   }
 
-  // Trigger Pass 2 when email is selected (with rate limit handling)
-  async function handleEmailSelect(email: EmailMeta) {
-    setSelectedEmail(email);
+  // Background analysis (non-blocking)
+  async function triggerBackgroundAnalysis(emails: any[]) {
+    // Check which emails need analysis
+    const needAnalysis = emails.filter(e => !e.quickAnalysis);
+    
+    if (needAnalysis.length === 0) return;
 
-    if (!email.deepAnalysis && user) {
-      // Run Pass 2 with retry
-      let retries = 3;
-      let delay = 2000;
-      
-      while (retries > 0) {
+    // Process in background without blocking UI
+    setTimeout(async () => {
+      for (let i = 0; i < needAnalysis.length; i += 2) {
+        const batch = needAnalysis.slice(i, i + 2);
+        
         try {
-          const pass2Res = await fetch("/api/analysis/pass2", {
+          const res = await fetch("/api/analysis/pass1", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email }),
+            body: JSON.stringify({ emails: batch }),
           });
 
-          if (pass2Res.status === 429) {
-            // Rate limited, wait and retry
-            retries--;
-            if (retries > 0) {
-              console.log(`Rate limited, retrying in ${delay}ms...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-              delay *= 2; // Exponential backoff
-              continue;
+          if (res.ok) {
+            const data = await res.json();
+            for (const result of data.results || []) {
+              if (result.quickAnalysis && user) {
+                const docRef = doc(db, `users/${user.email}/emails`, result.messageId);
+                await setDoc(docRef, { quickAnalysis: result.quickAnalysis }, { merge: true });
+              }
             }
           }
 
-          if (pass2Res.ok) {
-            const pass2Data = await pass2Res.json();
-            const docRef = doc(db, `users/${user.email}/emails`, email.messageId);
-            await setDoc(docRef, { deepAnalysis: pass2Data.deepAnalysis }, { merge: true });
-
-            // Run Pass 3 after Pass 2
-            await runPass3(email);
+          // Wait 2 seconds between batches
+          if (i + 2 < needAnalysis.length) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
           }
-          break;
         } catch (err) {
-          console.error("Pass 2 failed:", err);
-          retries--;
-          if (retries > 0) {
-            await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 2;
-          }
+          console.error("Background analysis error:", err);
         }
       }
+    }, 500);
+  }
+
+  // Optimistic UI: Show email immediately, analyze in background
+  async function handleEmailSelect(email: EmailMeta) {
+    // 1. IMMEDIATELY show the email (optimistic UI)
+    setSelectedEmail(email);
+
+    // 2. Check if we need deep analysis (non-blocking)
+    if (!email.deepAnalysis && user) {
+      setAnalyzingEmail(email.messageId);
+      
+      // Run in background without blocking
+      setTimeout(async () => {
+        let retries = 3;
+        let delay = 3000;
+        
+        while (retries > 0) {
+          try {
+            const pass2Res = await fetch("/api/analysis/pass2", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email }),
+            });
+
+            if (pass2Res.status === 429) {
+              retries--;
+              if (retries > 0) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2;
+                continue;
+              }
+            }
+
+            if (pass2Res.ok) {
+              const pass2Data = await pass2Res.json();
+              const docRef = doc(db, `users/${user.email}/emails`, email.messageId);
+              await setDoc(docRef, { deepAnalysis: pass2Data.deepAnalysis }, { merge: true });
+
+              // Run Pass 3 after Pass 2
+              runPass3(email);
+            }
+            break;
+          } catch (err) {
+            console.error("Pass 2 failed:", err);
+            retries--;
+            if (retries > 0) {
+              await new Promise(resolve => setTimeout(resolve, delay));
+              delay *= 2;
+            }
+          }
+        }
+        
+        setAnalyzingEmail(null);
+      }, 100);
     } else if (email.deepAnalysis && !email.semanticContext && user) {
-      // Run Pass 3 if deepAnalysis exists but semanticContext doesn't
-      await runPass3(email);
+      runPass3(email);
     }
   }
 
@@ -432,6 +401,12 @@ export default function HomePage() {
 
           {/* Email Detail Panel */}
           <div className="w-1/2 overflow-y-auto">
+            {analyzingEmail === selectedEmail?.messageId && (
+              <div className="p-4 bg-[#0b3d91]/10 border-b border-[#0b3d91]">
+                <LoadingSpinner />
+              </div>
+            )}
+            
             <EmailDetailPanel
               email={selectedEmail}
               onClose={() => setSelectedEmail(null)}
