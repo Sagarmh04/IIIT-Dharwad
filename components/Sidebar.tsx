@@ -17,9 +17,10 @@ type SidebarProps = {
   onFilterChange: (filters: any) => void;
   onSyncClick: () => void;
   syncing?: boolean;
+  onManageContacts?: () => void;
 };
 
-export default function Sidebar({ filters, onFilterChange, onSyncClick, syncing }: SidebarProps) {
+export default function Sidebar({ filters, onFilterChange, onSyncClick, syncing, onManageContacts }: SidebarProps) {
   const router = useRouter();
   const [expandedSections, setExpandedSections] = useState({
     sentiment: false,
@@ -80,35 +81,49 @@ export default function Sidebar({ filters, onFilterChange, onSyncClick, syncing 
           </div>
         </div>
         
-        <button
-          onClick={onSyncClick}
-          disabled={syncing}
-          className={`
-            group w-full py-3 px-4 rounded-xl font-medium transition-all duration-300 
-            relative overflow-hidden
-            ${syncing
-              ? "bg-linear-to-r from-blue-600/40 to-purple-600/40 cursor-wait"
-              : "bg-linear-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 hover:shadow-lg hover:shadow-blue-500/25 hover:-translate-y-0.5"
-            }
-          `}
-        >
-          <span className="relative z-10 flex items-center justify-center gap-2">
-            {syncing ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Syncing...
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4 group-hover:rotate-12 transition-transform" />
-                Sync Gmail Now
-              </>
+        <div className="space-y-2">
+          <button
+            onClick={onSyncClick}
+            disabled={syncing}
+            className={`
+              group w-full py-3 px-4 rounded-xl font-medium transition-all duration-300 
+              relative overflow-hidden
+              ${syncing
+                ? "bg-linear-to-r from-blue-600/40 to-purple-600/40 cursor-wait"
+                : "bg-linear-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 hover:shadow-lg hover:shadow-blue-500/25 hover:-translate-y-0.5"
+              }
+            `}
+          >
+            <span className="relative z-10 flex items-center justify-center gap-2">
+              {syncing ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Syncing...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 group-hover:rotate-12 transition-transform" />
+                  Sync Gmail Now
+                </>
+              )}
+            </span>
+            {!syncing && (
+              <div className="absolute inset-0 bg-linear-to-r from-blue-400/0 via-white/20 to-blue-400/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
             )}
-          </span>
-          {!syncing && (
-            <div className="absolute inset-0 bg-linear-to-r from-blue-400/0 via-white/20 to-blue-400/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+          </button>
+
+          {onManageContacts && (
+            <button
+              onClick={onManageContacts}
+              className="group w-full py-2.5 px-4 rounded-xl font-medium transition-all duration-300 bg-green-600/10 hover:bg-green-600/20 border border-green-500/20 hover:border-green-500/40 text-green-400 hover:text-green-300 flex items-center justify-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              Manage Contacts
+            </button>
           )}
-        </button>
+        </div>
       </div>
 
       {/* Scrollable Content */}

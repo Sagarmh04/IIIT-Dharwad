@@ -28,6 +28,7 @@ export default function EmailDetailPage() {
   const [email, setEmail] = useState<EmailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<{ email: string } | null>(null);
+  const [threadMessageCount, setThreadMessageCount] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     async function fetchUser() {
@@ -44,9 +45,19 @@ export default function EmailDetailPage() {
     if (!user || !messageId) return;
 
     const emailRef = doc(db, `users/${user.email}/emails`, messageId);
-    const unsub = onSnapshot(emailRef, (snap) => {
+    const unsub = onSnapshot(emailRef, async (snap) => {
       if (snap.exists()) {
-        setEmail(snap.data() as EmailData);
+        const emailData = snap.data() as EmailData;
+        setEmail(emailData);
+        
+        // Fetch thread message count if email has a threadId
+        if (emailData.threadId) {
+          const { collection, query, where, getDocs } = await import("firebase/firestore");
+          const emailsRef = collection(db, `users/${user.email}/emails`);
+          const q = query(emailsRef, where("threadId", "==", emailData.threadId));
+          const snapshot = await getDocs(q);
+          setThreadMessageCount(snapshot.size);
+        }
       }
       setLoading(false);
     });
@@ -54,7 +65,7 @@ export default function EmailDetailPage() {
     return () => unsub();
   }, [user, messageId]);
 
-  async function handleSendReply(reply: string, tone?: string, attachments?: any[]) {
+  async function handleSendReply(subject: string, body: string, tone?: string, attachments?: any[]) {
     if (!email) return;
 
     try {
@@ -66,8 +77,8 @@ export default function EmailDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: fromEmail,
-          subject: email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`,
-          message: reply,
+          subject: subject || (email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`),
+          message: body,
           threadId: email.threadId,
           messageId: email.messageId,
           attachments: attachments || [],
@@ -101,7 +112,7 @@ export default function EmailDetailPage() {
     return (
       <div className="min-h-screen bg-[#000000] text-white p-6">
         <div className="max-w-5xl mx-auto">
-          <button onClick={() => router.back()} className="mb-4 text-[#2b58b8] hover:underline">
+          <button onClick={() => router.push("/")} className="mb-4 text-[#2b58b8] hover:underline">
             ← Back
           </button>
           <div className="text-gray-400">Email not found</div>
@@ -119,17 +130,21 @@ export default function EmailDetailPage() {
 
         <div className="flex gap-6">
           <div className="flex-1">
-            <EmailDetailPanel email={email} showReplyBox={true} />
+            <EmailDetailPanel 
+              email={email} 
+              showReplyBox={true}
+              threadMessageCount={threadMessageCount}
+            />
           </div>
         </div>
 
-        {email.threadId && (
+        {email.threadId && threadMessageCount && threadMessageCount > 1 && (
           <div className="mt-6">
             <button
               onClick={() => router.push(`/thread/${email.threadId}`)}
               className="px-4 py-2 rounded-lg bg-[#0b3d91] hover:bg-[#2b58b8]"
             >
-              View Full Thread
+              View Full Thread ({threadMessageCount} messages)
             </button>
           </div>
         )}

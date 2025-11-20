@@ -22,6 +22,8 @@ import StatsCard from "@/components/StatsCard";
 import EmailListItem from "@/components/EmailListItem";
 import EmailDetailPanel from "@/components/EmailDetailPanel";
 import SmartReplyBox from "@/components/SmartReplyBox";
+import ComposeEmailBox from "@/components/ComposeEmailBox";
+import ContactsDialog from "@/components/ContactsDialog";
 import LoadingSpinner from "@/components/LoadingSpinner";
 
 type User = {
@@ -55,6 +57,10 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<any>({});
   const [stats, setStats] = useState<any>({});
+  const [showCompose, setShowCompose] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const [threadMessageCounts, setThreadMessageCounts] = useState<Record<string, number>>({});
+  const [showContactsDialog, setShowContactsDialog] = useState(false);
 
   // Real-time listener for emails
   useEffect(() => {
@@ -89,6 +95,7 @@ export default function HomePage() {
         });
         setEmails(arr);
         calculateStats(arr);
+        calculateThreadCounts(arr);
         setLoading(false);
       },
       (err) => {
@@ -149,6 +156,16 @@ export default function HomePage() {
     ).length;
 
     setStats({ analyzed, highPriority, compliance, pii });
+  }
+
+  function calculateThreadCounts(emailList: EmailMeta[]) {
+    const counts: Record<string, number> = {};
+    emailList.forEach((email) => {
+      if (email.threadId) {
+        counts[email.threadId] = (counts[email.threadId] || 0) + 1;
+      }
+    });
+    setThreadMessageCounts(counts);
   }
 
   // Unified Sync: One API call handles everything
@@ -358,10 +375,76 @@ export default function HomePage() {
     }
   }
 
-  async function handleSendReply(reply: string, tone?: string) {
-    console.log("Sending reply:", reply, "with tone:", tone);
-    // TODO: Implement send reply via Gmail API
-    alert("Reply sent! (not implemented yet)");
+  async function handleSendReply(subject: string, body: string, tone?: string, attachments?: any[]) {
+    if (!selectedEmail) return;
+
+    try {
+      // Extract sender email from the "from" field
+      const fromEmail = selectedEmail.from?.match(/<(.+)>/)?.[1] || selectedEmail.from;
+      
+      const response = await fetch("/api/gmail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: fromEmail,
+          subject: subject || (selectedEmail.subject.startsWith("Re:") ? selectedEmail.subject : `Re: ${selectedEmail.subject}`),
+          message: body,
+          threadId: selectedEmail.threadId,
+          messageId: selectedEmail.messageId,
+          attachments: attachments || [],
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert("Reply sent successfully!");
+        console.log("Reply sent:", result);
+      } else {
+        const error = await response.json();
+        console.error("Send error:", error);
+        alert(`Failed to send reply: ${error.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      console.error("Send reply error:", error);
+      alert("Failed to send reply. Please try again.");
+    }
+  }
+
+  async function handleSendNewEmail(subject: string, body: string, to: string, tone?: string, attachments?: any[]) {
+    if (!to || !subject || !body) {
+      alert("Please fill in all required fields (To, Subject, and Message)");
+      return;
+    }
+
+    setComposing(true);
+    try {
+      const response = await fetch("/api/gmail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to,
+          subject,
+          message: body,
+          attachments: attachments || [],
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert("Email sent successfully!");
+        setShowCompose(false);
+        console.log("Email sent:", result);
+      } else {
+        const error = await response.json();
+        console.error("Send error:", error);
+        alert(`Failed to send email: ${error.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      console.error("Send email error:", error);
+      alert("Failed to send email. Please try again.");
+    } finally {
+      setComposing(false);
+    }
   }
 
   return (
@@ -372,6 +455,7 @@ export default function HomePage() {
         onFilterChange={setFilters}
         onSyncClick={handleSync}
         syncing={syncing}
+        onManageContacts={() => setShowContactsDialog(true)}
       />
 
       {/* Main Content */}
@@ -380,12 +464,27 @@ export default function HomePage() {
         <div className="p-4 border-b border-white/10 bg-[#0b0b0e]">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl font-bold">Inbox</h1>
-            <button
-              onClick={() => router.push("/search")}
-              className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-            >
-              Search
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowCompose(true)}
+                className="group relative px-5 py-2.5 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 shadow-lg hover:shadow-xl hover:shadow-blue-500/30 transition-all duration-300 font-medium flex items-center gap-2 overflow-hidden"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
+                <svg className="w-5 h-5 relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                <span className="relative z-10">Compose</span>
+              </button>
+              <button
+                onClick={() => router.push("/search")}
+                className="group px-5 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 transition-all duration-300 font-medium flex items-center gap-2 hover:shadow-lg"
+              >
+                <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <span>Search</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-4 gap-4">
@@ -441,6 +540,7 @@ export default function HomePage() {
             <EmailDetailPanel
               email={selectedEmail}
               onClose={() => setSelectedEmail(null)}
+              threadMessageCount={selectedEmail?.threadId ? threadMessageCounts[selectedEmail.threadId] : undefined}
             />
 
             {selectedEmail && selectedEmail.deepAnalysis && (
@@ -448,12 +548,58 @@ export default function HomePage() {
                 <SmartReplyBox
                   onSendReply={handleSendReply}
                   suggestions={selectedEmail.deepAnalysis?.smartReplies || []}
+                  emailContext={{
+                    messageId: selectedEmail.messageId,
+                    subject: selectedEmail.subject,
+                    from: selectedEmail.from,
+                    body: selectedEmail.body,
+                    quickAnalysis: selectedEmail.quickAnalysis,
+                  }}
                 />
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* Compose Email Modal */}
+      {showCompose && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-gray-900 rounded-2xl shadow-2xl border border-white/10 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-gradient-to-r from-blue-600/10 to-purple-600/10">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <h2 className="text-xl font-bold">New Email</h2>
+              </div>
+              <button
+                onClick={() => setShowCompose(false)}
+                className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                disabled={composing}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <ComposeEmailBox
+                onSendEmail={handleSendNewEmail}
+                composing={composing}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Contacts Dialog */}
+      <ContactsDialog
+        isOpen={showContactsDialog}
+        onClose={() => setShowContactsDialog(false)}
+      />
     </div>
   );
 }

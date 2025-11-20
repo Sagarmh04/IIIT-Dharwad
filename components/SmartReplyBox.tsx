@@ -1,5 +1,38 @@
 import React, { useState, useRef } from "react";
-import { X, Paperclip, Send, Sparkles, MessageSquare } from "lucide-react";
+import { X, Paperclip, Sparkles, Send, MessageCircle } from "lucide-react";
+
+// Quick Answer Input Component
+function QuickAnswerInput({ onSubmit }: { onSubmit: (answer: string) => void }) {
+  const [answer, setAnswer] = useState("");
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (answer.trim()) {
+      onSubmit(answer);
+      setAnswer("");
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex gap-2">
+      <input
+        type="text"
+        value={answer}
+        onChange={(e) => setAnswer(e.target.value)}
+        placeholder="Type your answer..."
+        className="flex-1 p-2 rounded-lg bg-white/5 border border-white/10 text-sm text-gray-300 placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+        autoFocus
+      />
+      <button
+        type="submit"
+        disabled={!answer.trim()}
+        className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors flex items-center gap-2"
+      >
+        <Send className="w-4 h-4" />
+      </button>
+    </form>
+  );
+}
 
 type Attachment = {
   filename: string;
@@ -8,23 +41,32 @@ type Attachment = {
   size: number;
 };
 
-type ChatMessage = {
-  role: "user" | "assistant";
-  content: string;
+type Suggestion = {
+  subject: string;
+  body: string;
 };
 
 type SmartReplyBoxProps = {
-  onSendReply: (reply: string, tone?: string, attachments?: Attachment[]) => void;
-  suggestions?: string[];
+  onSendReply: (subject: string, body: string, tone?: string, attachments?: Attachment[]) => void;
+  suggestions?: Suggestion[];
   emailContext?: {
-    from?: string;
+    messageId: string;
     subject: string;
+    from?: string;
     body?: string;
+    quickAnalysis?: any;
   };
 };
 
+type ChatMessage = {
+  type: "question" | "answer" | "system";
+  text: string;
+  questionIndex?: number;
+};
+
 export default function SmartReplyBox({ onSendReply, suggestions = [], emailContext }: SmartReplyBoxProps) {
-  const [reply, setReply] = useState("");
+  const [replySubject, setReplySubject] = useState("");
+  const [replyBody, setReplyBody] = useState("");
   const [selectedTone, setSelectedTone] = useState<string>("professional");
   const [customTone, setCustomTone] = useState("");
   const [showCustomTone, setShowCustomTone] = useState(false);
@@ -32,20 +74,69 @@ export default function SmartReplyBox({ onSendReply, suggestions = [], emailCont
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Intent-based composition
-  const [showIntentMode, setShowIntentMode] = useState(false);
+
+  // Intent-based generation
   const [intent, setIntent] = useState("");
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [currentUserMessage, setCurrentUserMessage] = useState("");
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isDrafting, setIsDrafting] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [generating, setGenerating] = useState(false);
+  const [showIntentMode, setShowIntentMode] = useState(true);
+  const [questions, setQuestions] = useState<string[]>([]);
+  const [answers, setAnswers] = useState<string[]>([]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [showChat, setShowChat] = useState(false);
+
+  // Contacts and user info
+  const [contacts, setContacts] = useState<any[]>([]);
+  const [userName, setUserName] = useState<string>("");
+  const [contactsFetched, setContactsFetched] = useState(false);
 
   const tones = ["professional", "friendly", "formal", "casual", "custom"];
 
+  // Fetch contacts and user info before generating
+  async function fetchContactsAndUserInfo() {
+    if (contactsFetched && contacts.length > 0) {
+      console.log("📇 [SmartReply] Contacts already fetched:", contacts.length);
+      return { contacts, userName };
+    }
+    
+    try {
+      console.log("📇 [SmartReply] Fetching contacts and user info...");
+      
+      let fetchedContacts = contacts;
+      let fetchedUserName = userName;
+      
+      // Fetch contacts
+      const contactsRes = await fetch("/api/contacts");
+      if (contactsRes.ok) {
+        const contactsData = await contactsRes.json();
+        fetchedContacts = contactsData.contacts || [];
+        setContacts(fetchedContacts);
+        console.log("✅ [SmartReply] Contacts fetched:", fetchedContacts.length, fetchedContacts);
+      } else {
+        console.error("❌ [SmartReply] Contacts fetch failed:", contactsRes.status);
+      }
+
+      // Fetch user info
+      const userRes = await fetch("/api/user");
+      if (userRes.ok) {
+        const userData = await userRes.json();
+        fetchedUserName = userData.name || "";
+        setUserName(fetchedUserName);
+        console.log("✅ [SmartReply] User info fetched:", fetchedUserName);
+      } else {
+        console.error("❌ [SmartReply] User info fetch failed:", userRes.status);
+      }
+
+      setContactsFetched(true);
+      return { contacts: fetchedContacts, userName: fetchedUserName };
+    } catch (error) {
+      console.error("❌ [SmartReply] Error fetching contacts/user:", error);
+      return { contacts: [], userName: "" };
+    }
+  }
+
   async function handleToneCorrection() {
-    if (!reply.trim()) return;
+    if (!replyBody.trim()) return;
     
     setCorrecting(true);
     try {
@@ -53,12 +144,12 @@ export default function SmartReplyBox({ onSendReply, suggestions = [], emailCont
       const res = await fetch("/api/tone-correction", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: reply, tone: toneToUse }),
+        body: JSON.stringify({ text: replyBody, tone: toneToUse }),
       });
 
       if (res.ok) {
         const data = await res.json();
-        setReply(data.correctedText || reply);
+        setReplyBody(data.correctedText || replyBody);
       }
     } catch (err) {
       console.error("Tone correction failed:", err);
@@ -126,289 +217,288 @@ export default function SmartReplyBox({ onSendReply, suggestions = [], emailCont
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   }
 
-  async function handleIntentSubmit() {
+  async function handleGenerateFromIntent() {
     if (!intent.trim()) return;
 
-    setIsAnalyzing(true);
+    // Fetch contacts before generating and use returned values
+    const { contacts: fetchedContacts, userName: fetchedUserName } = await fetchContactsAndUserInfo();
+
+    setGenerating(true);
     try {
-      const response = await fetch("/api/compose-assistant", {
+      const res = await fetch("/api/email/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "analyze_intent",
-          intent,
+          intent: intent.trim(),
           emailContext,
+          contacts: fetchedContacts,
+          userName: fetchedUserName,
         }),
       });
 
-      if (response.ok) {
-        const result = await response.json();
+      if (res.ok) {
+        const data = await res.json();
         
-        if (result.sufficient) {
-          // Intent is clear, draft immediately
-          await handleDraftEmail();
-        } else {
-          // Need clarification, start chat
-          setChatHistory([
+        if (data.needsMoreInfo) {
+          // Need to ask questions
+          setQuestions(data.questions || []);
+          setAnswers(new Array(data.questions?.length || 0).fill(""));
+          setCurrentQuestionIndex(0);
+          setShowChat(true);
+          
+          // Add system message
+          setChatMessages([
             {
-              role: "assistant",
-              content: `${result.reasoning}\n\nLet me ask you a few questions:\n${result.questions.map((q: string, i: number) => `${i + 1}. ${q}`).join("\n")}`,
+              type: "system",
+              text: data.explanation || "I need more information to compose your email. Please answer the following questions:",
+            },
+            {
+              type: "question",
+              text: data.questions[0],
+              questionIndex: 0,
             },
           ]);
+        } else {
+          // Got email draft directly with subject and body
+          setReplySubject(data.subject || "");
+          setReplyBody(data.body || "");
+          setShowIntentMode(false);
         }
+      } else {
+        alert("Failed to generate email. Please try again.");
       }
-    } catch (error) {
-      console.error("Intent analysis error:", error);
-      alert("Failed to analyze intent. Please try again.");
+    } catch (err) {
+      console.error("Email generation failed:", err);
+      alert("Failed to generate email. Please try again.");
     } finally {
-      setIsAnalyzing(false);
+      setGenerating(false);
     }
   }
 
-  async function handleChatMessage() {
-    if (!currentUserMessage.trim()) return;
+  function handleAnswerQuestion(answer: string) {
+    if (!answer.trim()) return;
 
-    const userMsg: ChatMessage = {
-      role: "user",
-      content: currentUserMessage,
-    };
+    const newAnswers = [...answers];
+    newAnswers[currentQuestionIndex] = answer.trim();
+    setAnswers(newAnswers);
 
-    setChatHistory([...chatHistory, userMsg]);
-    setCurrentUserMessage("");
-    setIsAnalyzing(true);
+    // Add answer to chat
+    const newMessages = [
+      ...chatMessages,
+      {
+        type: "answer" as const,
+        text: answer.trim(),
+        questionIndex: currentQuestionIndex,
+      },
+    ];
 
-    try {
-      const response = await fetch("/api/compose-assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "chat",
-          userMessage: currentUserMessage,
-          chatHistory: [...chatHistory, userMsg],
-          emailContext,
-        }),
+    // Check if there are more questions
+    if (currentQuestionIndex < questions.length - 1) {
+      const nextIndex = currentQuestionIndex + 1;
+      setCurrentQuestionIndex(nextIndex);
+      newMessages.push({
+        type: "question" as const,
+        text: questions[nextIndex],
+        questionIndex: nextIndex,
       });
-
-      if (response.ok) {
-        const result = await response.json();
-        const assistantMsg: ChatMessage = {
-          role: "assistant",
-          content: result.message,
-        };
-        setChatHistory([...chatHistory, userMsg, assistantMsg]);
-
-        // Check if assistant says we have enough info
-        if (result.message.toLowerCase().includes("enough information") || 
-            result.message.toLowerCase().includes("draft your email")) {
-          setTimeout(() => handleDraftEmail(), 1000);
-        }
-      }
-    } catch (error) {
-      console.error("Chat error:", error);
-      setChatHistory([
-        ...chatHistory,
-        userMsg,
-        { role: "assistant", content: "Sorry, I encountered an error. Please try again." },
-      ]);
-    } finally {
-      setIsAnalyzing(false);
+      setChatMessages(newMessages);
+    } else {
+      // All questions answered, generate email
+      setChatMessages(newMessages);
+      generateEmailFromAnswers(newAnswers);
     }
   }
 
-  async function handleDraftEmail() {
-    setIsDrafting(true);
+  async function generateEmailFromAnswers(finalAnswers: string[]) {
+    setGenerating(true);
+    
+    // Ensure we have latest contacts
+    const { contacts: fetchedContacts, userName: fetchedUserName } = await fetchContactsAndUserInfo();
+    
     try {
-      const response = await fetch("/api/compose-assistant", {
-        method: "POST",
+      const res = await fetch("/api/email/generate", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "draft",
-          intent,
-          chatHistory,
+          intent: intent.trim(),
           emailContext,
-          currentDraft: reply,
+          questions,
+          answers: finalAnswers,
+          contacts: fetchedContacts,
+          userName: fetchedUserName,
         }),
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        setReply(result.draft);
+      if (res.ok) {
+        const data = await res.json();
+        setReplySubject(data.subject || "");
+        setReplyBody(data.body || "");
         setShowIntentMode(false);
-        setChatHistory([]);
-        setIntent("");
+        setShowChat(false);
+        
+        // Add success message
+        setChatMessages([
+          ...chatMessages,
+          {
+            type: "system",
+            text: "✓ Email generated! You can now review and edit it below.",
+          },
+        ]);
+      } else {
+        alert("Failed to generate email. Please try again.");
       }
-    } catch (error) {
-      console.error("Draft error:", error);
-      alert("Failed to draft email. Please try again.");
+    } catch (err) {
+      console.error("Email generation failed:", err);
+      alert("Failed to generate email. Please try again.");
     } finally {
-      setIsDrafting(false);
+      setGenerating(false);
     }
   }
 
-  function scrollChatToBottom() {
-    setTimeout(() => {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
+  function resetIntentMode() {
+    setIntent("");
+    setShowIntentMode(true);
+    setShowChat(false);
+    setQuestions([]);
+    setAnswers([]);
+    setCurrentQuestionIndex(0);
+    setChatMessages([]);
+    setReplySubject("");
+    setReplyBody("");
   }
-
-  React.useEffect(() => {
-    if (chatHistory.length > 0) {
-      scrollChatToBottom();
-    }
-  }, [chatHistory]);
 
   return (
     <div className="p-4 rounded-lg bg-[#0b0b0e] border border-white/10">
       <div className="flex items-center justify-between mb-3">
         <div className="text-sm font-semibold text-gray-300">Smart Reply</div>
         <button
-          onClick={() => {
-            setShowIntentMode(!showIntentMode);
-            if (!showIntentMode) {
-              setChatHistory([]);
-              setIntent("");
-            }
-          }}
-          className="flex items-center gap-1 px-3 py-1 rounded text-xs bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 transition-colors"
+          onClick={() => setShowIntentMode(!showIntentMode)}
+          className="text-xs px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-gray-400 transition-colors flex items-center gap-1"
         >
           <Sparkles className="w-3 h-3" />
-          {showIntentMode ? "Manual Mode" : "AI Assistant"}
+          {showIntentMode ? "Manual Mode" : "AI Mode"}
         </button>
       </div>
 
-      {/* Intent-Based Mode */}
+      {/* Intent-Based Generation */}
       {showIntentMode && (
-        <div className="mb-4 p-4 rounded-lg bg-purple-600/5 border border-purple-500/20">
-          <div className="text-xs font-semibold text-purple-300 mb-2">
-            Tell me your intent
-          </div>
-          <div className="text-xs text-gray-400 mb-3">
-            Describe what you want to say (e.g., "Accept the meeting for Tuesday", "Ask for more details about the project")
-          </div>
-          
-          {chatHistory.length === 0 ? (
+        <div className="mb-4 p-4 rounded-lg bg-linear-to-br from-blue-500/10 to-purple-500/10 border border-blue-500/20">
+          <div className="flex items-start gap-2 mb-3">
+            <Sparkles className="w-5 h-5 text-blue-400 mt-0.5 shrink-0" />
             <div>
-              <textarea
-                value={intent}
-                onChange={(e) => setIntent(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleIntentSubmit();
-                  }
-                }}
-                placeholder="e.g., Decline the meeting politely and suggest Wednesday instead"
-                rows={2}
-                className="w-full p-2 rounded bg-white/5 border border-white/10 text-sm text-gray-300 placeholder-gray-500 focus:border-purple-500 focus:outline-none resize-none"
-              />
-              <button
-                onClick={handleIntentSubmit}
-                disabled={!intent.trim() || isAnalyzing}
-                className="mt-2 px-3 py-1.5 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-sm flex items-center gap-2 transition-colors"
-              >
-                {isAnalyzing ? (
-                  <>
-                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Analyzing...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    Analyze Intent
-                  </>
-                )}
-              </button>
-            </div>
-          ) : (
-            <div>
-              {/* Chat Interface */}
-              <div className="mb-3 max-h-64 overflow-y-auto space-y-2 p-2 rounded bg-black/20">
-                {chatHistory.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`p-2 rounded text-sm ${
-                      msg.role === "user"
-                        ? "bg-blue-600/20 text-blue-100 ml-6"
-                        : "bg-purple-600/20 text-purple-100 mr-6"
-                    }`}
-                  >
-                    <div className="text-xs opacity-70 mb-1">
-                      {msg.role === "user" ? "You" : "AI Assistant"}
-                    </div>
-                    <div className="whitespace-pre-wrap">{msg.content}</div>
-                  </div>
-                ))}
-                {isDrafting && (
-                  <div className="p-2 rounded text-sm bg-purple-600/20 text-purple-100 mr-6">
-                    <div className="text-xs opacity-70 mb-1">AI Assistant</div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 border-2 border-purple-400/30 border-t-purple-400 rounded-full animate-spin" />
-                      Drafting your email...
-                    </div>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
+              <div className="text-sm font-medium text-blue-300 mb-1">AI Email Assistant</div>
+              <div className="text-xs text-gray-400">
+                Tell me what you want to say, and I'll help you compose the perfect reply
               </div>
+            </div>
+          </div>
 
-              {!isDrafting && (
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={currentUserMessage}
-                    onChange={(e) => setCurrentUserMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleChatMessage();
-                      }
-                    }}
-                    placeholder="Type your answer..."
-                    className="flex-1 p-2 rounded bg-white/5 border border-white/10 text-sm text-gray-300 placeholder-gray-500 focus:border-purple-500 focus:outline-none"
-                    disabled={isAnalyzing}
-                  />
-                  <button
-                    onClick={handleChatMessage}
-                    disabled={!currentUserMessage.trim() || isAnalyzing}
-                    className="px-3 py-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 transition-colors"
-                  >
-                    {isAnalyzing ? (
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              )}
+          <div className="mb-3">
+            <textarea
+              value={intent}
+              onChange={(e) => setIntent(e.target.value)}
+              placeholder="E.g., 'Accept the meeting and suggest Thursday at 2pm' or 'Decline politely due to schedule conflict'"
+              rows={3}
+              className="w-full p-3 rounded-lg bg-white/5 border border-white/10 text-sm text-gray-300 placeholder-gray-500 focus:border-blue-500 focus:outline-none resize-none"
+              disabled={generating || showChat}
+            />
+          </div>
 
-              <button
-                onClick={() => {
-                  setChatHistory([]);
-                  setIntent("");
-                }}
-                className="mt-2 text-xs text-gray-400 hover:text-gray-300 transition-colors"
-              >
-                ← Start over
-              </button>
+          {!showChat ? (
+            <button
+              onClick={handleGenerateFromIntent}
+              disabled={!intent.trim() || generating}
+              className="w-full px-4 py-2 rounded-lg bg-linear-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-all flex items-center justify-center gap-2"
+            >
+              <Sparkles className="w-4 h-4" />
+              {generating ? "Generating..." : "Generate Email"}
+            </button>
+          ) : (
+            <button
+              onClick={resetIntentMode}
+              className="w-full px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm font-medium transition-all"
+            >
+              Start Over
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Chat Interface for Questions */}
+      {showChat && (
+        <div className="mb-4 p-4 rounded-lg bg-white/5 border border-white/10">
+          <div className="flex items-center gap-2 mb-3">
+            <MessageCircle className="w-4 h-4 text-purple-400" />
+            <div className="text-sm font-medium text-purple-300">Clarifying Questions</div>
+          </div>
+
+          <div className="space-y-3 mb-3 max-h-60 overflow-y-auto">
+            {chatMessages.map((msg, idx) => (
+              <div key={idx}>
+                {msg.type === "system" && (
+                  <div className="text-xs text-blue-400 italic p-2 rounded bg-blue-500/10">
+                    {msg.text}
+                  </div>
+                )}
+                {msg.type === "question" && (
+                  <div className="text-sm text-gray-300 p-2 rounded bg-purple-500/10 border border-purple-500/20">
+                    <span className="text-purple-400 font-medium">Q{(msg.questionIndex || 0) + 1}:</span> {msg.text}
+                  </div>
+                )}
+                {msg.type === "answer" && (
+                  <div className="text-sm text-gray-200 p-2 rounded bg-green-500/10 border border-green-500/20 ml-4">
+                    <span className="text-green-400 font-medium">A:</span> {msg.text}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {currentQuestionIndex < questions.length && !generating && (
+            <QuickAnswerInput onSubmit={handleAnswerQuestion} />
+          )}
+
+          {generating && (
+            <div className="text-center text-sm text-blue-400 flex items-center justify-center gap-2">
+              <div className="w-4 h-4 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
+              Generating your email...
             </div>
           )}
         </div>
       )}
 
       {/* Suggestions */}
-      {suggestions.length > 0 && (
+      {!showIntentMode && suggestions.length > 0 && (
         <div className="mb-3">
           <div className="text-xs text-gray-500 mb-2">Suggested Replies</div>
           <div className="space-y-2">
             {suggestions.map((sugg, idx) => (
               <button
                 key={idx}
-                onClick={() => setReply(sugg)}
-                className="w-full text-left p-2 rounded text-sm bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10"
+                onClick={() => {
+                  setReplySubject(sugg.subject);
+                  setReplyBody(sugg.body);
+                }}
+                className="w-full text-left p-3 rounded bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
               >
-                {sugg}
+                <div className="text-sm font-medium text-gray-200 mb-1">{sugg.subject}</div>
+                <div className="text-xs text-gray-400 line-clamp-2">{sugg.body}</div>
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Show reset button if email was generated from intent */}
+      {!showIntentMode && (replySubject || replyBody) && (
+        <div className="mb-3">
+          <button
+            onClick={resetIntentMode}
+            className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+          >
+            <Sparkles className="w-3 h-3" />
+            Generate a new reply with AI
+          </button>
         </div>
       )}
 
@@ -452,14 +542,29 @@ export default function SmartReplyBox({ onSendReply, suggestions = [], emailCont
         )}
       </div>
 
-      {/* Reply Text Area */}
-      <textarea
-        value={reply}
-        onChange={(e) => setReply(e.target.value)}
-        placeholder="Type your reply here..."
-        rows={6}
-        className="w-full p-3 rounded-lg bg-white/5 border border-white/10 text-sm text-gray-300 placeholder-gray-500 focus:border-[#0b3d91] focus:outline-none resize-none"
-      />
+      {/* Subject Field */}
+      <div className="mb-3">
+        <label className="text-xs text-gray-500 mb-1 block">Subject</label>
+        <input
+          type="text"
+          value={replySubject}
+          onChange={(e) => setReplySubject(e.target.value)}
+          placeholder="Email subject..."
+          className="w-full p-3 rounded-lg bg-white/5 border border-white/10 text-sm text-gray-300 placeholder-gray-500 focus:border-[#0b3d91] focus:outline-none"
+        />
+      </div>
+
+      {/* Body Text Area */}
+      <div className="mb-3">
+        <label className="text-xs text-gray-500 mb-1 block">Message Body</label>
+        <textarea
+          value={replyBody}
+          onChange={(e) => setReplyBody(e.target.value)}
+          placeholder="Type your message here..."
+          rows={8}
+          className="w-full p-3 rounded-lg bg-white/5 border border-white/10 text-sm text-gray-300 placeholder-gray-500 focus:border-[#0b3d91] focus:outline-none resize-none"
+        />
+      </div>
 
       {/* Attachments */}
       {attachments.length > 0 && (
@@ -490,20 +595,26 @@ export default function SmartReplyBox({ onSendReply, suggestions = [], emailCont
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-2 mt-3">
+      <div className="flex items-center gap-2 mt-3 flex-wrap">
         <button
           onClick={() => {
             const toneToUse = selectedTone === "custom" ? customTone : selectedTone;
-            onSendReply(reply, toneToUse, attachments);
+            onSendReply(replySubject, replyBody, toneToUse, attachments);
           }}
-          disabled={!reply.trim()}
-          className="px-4 py-2 rounded-lg bg-[#0b3d91] hover:bg-[#2b58b8] disabled:opacity-50 text-sm font-medium transition-colors"
+          disabled={!replySubject.trim() || !replyBody.trim()}
+          className="px-4 py-2 rounded-lg bg-[#0b3d91] hover:bg-[#2b58b8] disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors flex items-center gap-2"
         >
+          <Send className="w-4 h-4" />
           Send Reply
+          {attachments.length > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-white/20 text-xs">
+              {attachments.length}
+            </span>
+          )}
         </button>
         <button
           onClick={handleToneCorrection}
-          disabled={!reply.trim() || correcting || (selectedTone === "custom" && !customTone.trim())}
+          disabled={!replyBody.trim() || correcting || (selectedTone === "custom" && !customTone.trim())}
           className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 text-sm font-medium transition-colors"
         >
           {correcting ? "Correcting..." : "Correct Tone"}

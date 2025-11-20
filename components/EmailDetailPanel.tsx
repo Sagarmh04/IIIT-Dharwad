@@ -24,14 +24,15 @@ type EmailDetailPanelProps = {
   } | null;
   onClose?: () => void;
   showReplyBox?: boolean;
+  threadMessageCount?: number;
 };
 
-export default function EmailDetailPanel({ email, onClose, showReplyBox = false }: EmailDetailPanelProps) {
+export default function EmailDetailPanel({ email, onClose, showReplyBox = false, threadMessageCount }: EmailDetailPanelProps) {
   const router = useRouter();
   const [isReplying, setIsReplying] = useState(false);
   const [sending, setSending] = useState(false);
 
-  async function handleSendReply(reply: string, tone?: string, attachments?: Attachment[]) {
+  async function handleSendReply(subject: string, body: string, tone?: string, attachments?: Attachment[]) {
     if (!email) return;
 
     setSending(true);
@@ -44,8 +45,8 @@ export default function EmailDetailPanel({ email, onClose, showReplyBox = false 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: fromEmail,
-          subject: email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`,
-          message: reply,
+          subject: subject || (email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`),
+          message: body,
           threadId: email.threadId,
           messageId: email.messageId,
           attachments: attachments || [],
@@ -104,13 +105,6 @@ export default function EmailDetailPanel({ email, onClose, showReplyBox = false 
 
           {/* Action Buttons */}
           <div className="mt-4 flex gap-2 flex-wrap">
-            <button
-              onClick={() => setIsReplying(!isReplying)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600/10 hover:bg-green-600/20 border border-green-500/20 hover:border-green-500/40 text-green-400 hover:text-green-300 transition-all text-sm"
-            >
-              <Reply className="w-4 h-4" />
-              {isReplying ? "Hide Reply" : "Reply"}
-            </button>
             
             <button
               onClick={() => router.push(`/emails/${email.messageId}`)}
@@ -120,13 +114,13 @@ export default function EmailDetailPanel({ email, onClose, showReplyBox = false 
               Open Full Screen
             </button>
             
-            {email.threadId && (
+            {email.threadId && threadMessageCount && threadMessageCount > 1 && (
               <button
                 onClick={() => router.push(`/thread/${email.threadId}`)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600/10 hover:bg-purple-600/20 border border-purple-500/20 hover:border-purple-500/40 text-purple-400 hover:text-purple-300 transition-all text-sm"
               >
                 <MessageSquare className="w-4 h-4" />
-                Open Thread
+                Open Thread ({threadMessageCount} messages)
               </button>
             )}
           </div>
@@ -244,9 +238,11 @@ export default function EmailDetailPanel({ email, onClose, showReplyBox = false 
               onSendReply={handleSendReply}
               suggestions={deepAnalysis?.smartReplies || []}
               emailContext={{
-                from: from,
+                messageId: email.messageId,
                 subject: subject,
+                from: from,
                 body: body,
+                quickAnalysis: quickAnalysis,
               }}
             />
           </div>

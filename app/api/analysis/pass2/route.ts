@@ -22,7 +22,11 @@ export async function POST(req: NextRequest) {
     "issues": ["issue1", "issue2"]
   },
   "piiDetected": ["type1", "type2"],
-  "smartReplies": ["reply1", "reply2", "reply3"],
+  "smartReplies": [
+    {"subject": "Short subject line", "body": "Complete reply text"},
+    {"subject": "Short subject line", "body": "Complete reply text"},
+    {"subject": "Short subject line", "body": "Complete reply text"}
+  ],
   "conversationHealthScore": 0-100
 }
 

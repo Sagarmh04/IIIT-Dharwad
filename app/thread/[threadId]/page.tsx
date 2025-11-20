@@ -32,6 +32,7 @@ export default function ThreadPage() {
   const [hasCheckedAnalysis, setHasCheckedAnalysis] = useState(false);
   const [showReplyBox, setShowReplyBox] = useState(false);
   const [sending, setSending] = useState(false);
+  const [previousEmailCount, setPreviousEmailCount] = useState(0);
 
   useEffect(() => {
     async function fetchUser() {
@@ -65,10 +66,19 @@ export default function ThreadPage() {
       setEmails(emailsData);
       setLoading(false);
 
-      // Check for existing thread analysis in Firestore first
-      if (emailsData.length > 0 && !hasCheckedAnalysis) {
+      // Check if the thread size has changed (new reply added)
+      const currentCount = emailsData.length;
+      if (previousEmailCount > 0 && currentCount > previousEmailCount) {
+        console.log(`Thread ${threadId} has new messages (${previousEmailCount} -> ${currentCount}), re-analyzing...`);
+        setHasCheckedAnalysis(false);
+        setThreadAnalysis(null);
+        analyzeThread(emailsData);
+      } else if (emailsData.length > 0 && !hasCheckedAnalysis) {
+        // Initial load - check for existing analysis
         checkExistingAnalysis(emailsData);
       }
+      
+      setPreviousEmailCount(currentCount);
     });
 
     return () => unsub();
@@ -100,7 +110,7 @@ export default function ThreadPage() {
     }
   }
 
-  async function handleSendReply(reply: string, tone?: string, attachments?: any[]) {
+  async function handleSendReply(subject: string, body: string, tone?: string, attachments?: any[]) {
     if (!user || emails.length === 0) return;
 
     setSending(true);
@@ -113,8 +123,8 @@ export default function ThreadPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: fromEmail,
-          subject: latestEmail.subject.startsWith("Re:") ? latestEmail.subject : `Re: ${latestEmail.subject}`,
-          message: reply,
+          subject: subject || (latestEmail.subject.startsWith("Re:") ? latestEmail.subject : `Re: ${latestEmail.subject}`),
+          message: body,
           threadId: threadId,
           messageId: latestEmail.messageId,
           attachments: attachments || [],
@@ -124,6 +134,7 @@ export default function ThreadPage() {
       if (response.ok) {
         alert("Reply sent successfully!");
         setShowReplyBox(false);
+        // Note: The onSnapshot listener will detect the new email and trigger re-analysis
       } else {
         const error = await response.json();
         alert(`Failed to send reply: ${error.error || "Unknown error"}`);
@@ -346,11 +357,13 @@ export default function ThreadPage() {
             <SmartReplyBox
               onSendReply={handleSendReply}
               suggestions={latestEmail?.deepAnalysis?.smartReplies || []}
-              emailContext={{
-                from: latestEmail?.from,
-                subject: latestEmail?.subject || "",
-                body: latestEmail?.body,
-              }}
+              emailContext={latestEmail ? {
+                messageId: latestEmail.messageId,
+                subject: latestEmail.subject,
+                from: latestEmail.from,
+                body: latestEmail.body,
+                quickAnalysis: latestEmail.quickAnalysis,
+              } : undefined}
             />
           </div>
         )}
