@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,14 +28,12 @@ From: ${email.from}
 To: ${email.to}
 Body: ${email.body}`;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
-      response_format: { type: "json_object" },
+    const result = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
     });
-
-    let content = completion.choices[0]?.message?.content || "{}";
+    let content = result.text;
+    
     // Strip markdown code blocks if present
     content = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const semanticContext = JSON.parse(content);

@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,13 +15,11 @@ export async function POST(req: NextRequest) {
 
 ${text}`;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.7,
+    const result = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
     });
-
-    const correctedText = completion.choices[0]?.message?.content || text;
+    const correctedText = result.text || text;
 
     return NextResponse.json({ correctedText });
   } catch (error: any) {
