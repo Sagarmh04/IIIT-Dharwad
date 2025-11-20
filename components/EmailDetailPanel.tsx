@@ -1,8 +1,11 @@
 import React from "react";
+import { useRouter } from "next/navigation";
+import { Maximize2, MessageSquare } from "lucide-react";
 
 type EmailDetailPanelProps = {
   email: {
     messageId: string;
+    threadId?: string;
     subject: string;
     from?: string;
     to?: string;
@@ -15,6 +18,7 @@ type EmailDetailPanelProps = {
 };
 
 export default function EmailDetailPanel({ email, onClose }: EmailDetailPanelProps) {
+  const router = useRouter();
   if (!email) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-400">
@@ -31,20 +35,44 @@ export default function EmailDetailPanel({ email, onClose }: EmailDetailPanelPro
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-start justify-between mb-4">
-            <h2 className="text-2xl font-bold">{subject}</h2>
-            {onClose && (
-              <button
-                onClick={onClose}
-                className="text-gray-400 hover:text-white"
-              >
-                ✕
-              </button>
-            )}
+            <h2 className="text-2xl font-bold flex-1">{subject}</h2>
+            <div className="flex items-center gap-2">
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-all"
+                  title="Close"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
           <div className="text-sm text-gray-400 space-y-1">
             <div>From: {from}</div>
             <div>To: {to}</div>
             <div>Date: {date ? new Date(date).toLocaleString() : "—"}</div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={() => router.push(`/emails/${email.messageId}`)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 hover:border-blue-500/40 text-blue-400 hover:text-blue-300 transition-all text-sm"
+            >
+              <Maximize2 className="w-4 h-4" />
+              Open Full Screen
+            </button>
+            
+            {email.threadId && (
+              <button
+                onClick={() => router.push(`/thread/${email.threadId}`)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600/10 hover:bg-purple-600/20 border border-purple-500/20 hover:border-purple-500/40 text-purple-400 hover:text-purple-300 transition-all text-sm"
+              >
+                <MessageSquare className="w-4 h-4" />
+                Open Thread
+              </button>
+            )}
           </div>
         </div>
 

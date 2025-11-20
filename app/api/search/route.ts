@@ -25,7 +25,7 @@ Extract search intents and return ONLY a valid JSON object:
       model: "gemini-2.5-flash",
       contents: prompt,
     });
-    let content = result.text;
+    let content = result.text || "";
     
     // Strip markdown code blocks if present
     content = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();

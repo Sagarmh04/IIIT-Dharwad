@@ -175,16 +175,35 @@ export default function HomePage() {
 
       // Save emails to Firestore from client
       if (data.emails && Array.isArray(data.emails)) {
+        const emailsNeedingAnalysis: any[] = [];
+        
         for (const email of data.emails) {
           const docRef = doc(db, `users/${user.email}/emails`, email.messageId);
+          
+          // Check if this email already exists in our state with analysis
+          const existingEmail = emails.find(e => e.messageId === email.messageId);
+          
+          // Save email (merge to preserve any existing analysis data)
           await setDoc(docRef, {
             ...email,
             createdAt: serverTimestamp(),
           }, { merge: true });
+          
+          // Only add to analysis queue if it doesn't have quickAnalysis in Firestore
+          if (!existingEmail?.quickAnalysis) {
+            emailsNeedingAnalysis.push(email);
+          } else {
+            console.log(`Email ${email.messageId} already has quickAnalysis, skipping Pass 1`);
+          }
         }
 
-        // Trigger background analysis for new emails (non-blocking)
-        triggerBackgroundAnalysis(data.emails);
+        // Trigger background analysis only for emails that need it
+        if (emailsNeedingAnalysis.length > 0) {
+          console.log(`Queueing ${emailsNeedingAnalysis.length} emails for Pass 1 analysis`);
+          triggerBackgroundAnalysis(emailsNeedingAnalysis);
+        } else {
+          console.log("All synced emails already have Pass 1 analysis");
+        }
       }
 
       setSyncing(false);
@@ -197,15 +216,17 @@ export default function HomePage() {
 
   // Background analysis (non-blocking)
   async function triggerBackgroundAnalysis(emails: any[]) {
-    // Check which emails need analysis
-    const needAnalysis = emails.filter(e => !e.quickAnalysis);
+    // Check which emails need Pass 1 analysis (quickAnalysis)
+    const needPass1 = emails.filter(e => !e.quickAnalysis);
     
-    if (needAnalysis.length === 0) return;
+    if (needPass1.length === 0) return;
+
+    console.log(`Starting Pass 1 analysis for ${needPass1.length} emails...`);
 
     // Process in background without blocking UI
     setTimeout(async () => {
-      for (let i = 0; i < needAnalysis.length; i += 2) {
-        const batch = needAnalysis.slice(i, i + 2);
+      for (let i = 0; i < needPass1.length; i += 2) {
+        const batch = needPass1.slice(i, i + 2);
         
         try {
           const res = await fetch("/api/analysis/pass1", {
@@ -225,7 +246,7 @@ export default function HomePage() {
           }
 
           // Wait 2 seconds between batches
-          if (i + 2 < needAnalysis.length) {
+          if (i + 2 < needPass1.length) {
             await new Promise(resolve => setTimeout(resolve, 2000));
           }
         } catch (err) {
@@ -236,12 +257,17 @@ export default function HomePage() {
   }
 
   // Optimistic UI: Show email immediately, analyze in background
+  // This function implements smart analysis checking:
+  // - Only calls Pass 2 if deepAnalysis doesn't exist
+  // - Only calls Pass 3 if semanticContext doesn't exist
+  // - Skips API calls for already-analyzed emails
   async function handleEmailSelect(email: EmailMeta) {
     // 1. IMMEDIATELY show the email (optimistic UI)
     setSelectedEmail(email);
 
-    // 2. Check if we need deep analysis (non-blocking)
+    // 2. Check if email needs Pass 2 (deepAnalysis) - skip if already analyzed
     if (!email.deepAnalysis && user) {
+      console.log(`Email ${email.messageId} needs Pass 2 analysis`);
       setAnalyzingEmail(email.messageId);
       
       // Run in background without blocking
@@ -271,7 +297,7 @@ export default function HomePage() {
               const docRef = doc(db, `users/${user.email}/emails`, email.messageId);
               await setDoc(docRef, { deepAnalysis: pass2Data.deepAnalysis }, { merge: true });
 
-              // Run Pass 3 after Pass 2
+              // Run Pass 3 after Pass 2 completes
               runPass3(email);
             }
             break;
@@ -288,12 +314,25 @@ export default function HomePage() {
         setAnalyzingEmail(null);
       }, 100);
     } else if (email.deepAnalysis && !email.semanticContext && user) {
+      // Email has Pass 2 but needs Pass 3 - run it
+      console.log(`Email ${email.messageId} needs Pass 3 analysis`);
       runPass3(email);
+    } else if (email.deepAnalysis && email.semanticContext) {
+      // Email is fully analyzed - no action needed
+      console.log(`Email ${email.messageId} is fully analyzed`);
     }
   }
 
   async function runPass3(email: EmailMeta) {
     if (!user) return;
+
+    // Skip if semanticContext already exists
+    if (email.semanticContext) {
+      console.log(`Email ${email.messageId} already has Pass 3 analysis, skipping`);
+      return;
+    }
+
+    console.log(`Running Pass 3 analysis for ${email.messageId}`);
 
     try {
       const pass3Res = await fetch("/api/analysis/pass3", {
@@ -341,20 +380,12 @@ export default function HomePage() {
         <div className="p-4 border-b border-white/10 bg-[#0b0b0e]">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl font-bold">Inbox</h1>
-            <div className="flex gap-2">
-              <button
-                onClick={() => router.push("/search")}
-                className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10"
-              >
-                Search
-              </button>
-              <button
-                onClick={() => router.push("/api/auth/logout")}
-                className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10"
-              >
-                Logout
-              </button>
-            </div>
+            <button
+              onClick={() => router.push("/search")}
+              className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+            >
+              Search
+            </button>
           </div>
 
           <div className="grid grid-cols-4 gap-4">
