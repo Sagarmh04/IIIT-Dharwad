@@ -123,6 +123,16 @@ export default function Sidebar({ filters, onFilterChange, onSyncClick, syncing,
               Manage Contacts
             </button>
           )}
+
+          <button
+            onClick={() => router.push("/tasks")}
+            className="group w-full py-2.5 px-4 rounded-xl font-medium transition-all duration-300 bg-purple-600/10 hover:bg-purple-600/20 border border-purple-500/20 hover:border-purple-500/40 text-purple-400 hover:text-purple-300 flex items-center justify-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+            View Tasks
+          </button>
         </div>
       </div>
 
