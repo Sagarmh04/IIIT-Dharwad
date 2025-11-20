@@ -51,11 +51,11 @@ export default function LoginPage() {
           <div className="relative flex flex-col items-center text-center">
             
             {/* Logo with a subtle glass container */}
-            <div className="mb-6 p-3 rounded-2xl bg-white/5 border border-white/10 shadow-inner">
+            <div className="mb-6 p-2 rounded-2xl bg-white/5 border border-white/10 shadow-inner">
               <img
                 src="/logo.png"
                 alt="App Logo"
-                className="w-16 h-16 object-contain rounded-xl"
+                className="w-32 h-32 object-contain rounded-xl"
               />
             </div>
 
@@ -74,9 +74,10 @@ export default function LoginPage() {
               className={`
                 relative w-full flex items-center justify-center gap-3 
                 bg-white text-black 
-                hover:bg-gray-100 active:scale-95
+                hover:bg-blue-600 hover:text-white active:scale-95
                 font-semibold py-3.5 rounded-xl 
                 transition-all duration-200 shadow-[0_0_20px_rgba(255,255,255,0.1)]
+                hover:shadow-[0_0_25px_rgba(37,99,235,0.6)]
                 disabled:opacity-70 disabled:cursor-not-allowed
               `}
             >
@@ -105,7 +106,7 @@ export default function LoginPage() {
               ) : (
                 <>
                   <Image
-                    src="/google.png"
+                    src="/google-logo.png"
                     alt="Google Logo"
                     width={20}
                     height={20}
