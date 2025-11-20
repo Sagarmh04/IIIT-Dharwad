@@ -1,6 +1,14 @@
-import React from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Maximize2, MessageSquare } from "lucide-react";
+import { Maximize2, MessageSquare, Reply } from "lucide-react";
+import SmartReplyBox from "./SmartReplyBox";
+
+type Attachment = {
+  filename: string;
+  mimeType: string;
+  data: string;
+  size: number;
+};
 
 type EmailDetailPanelProps = {
   email: {
@@ -15,10 +23,50 @@ type EmailDetailPanelProps = {
     deepAnalysis?: any;
   } | null;
   onClose?: () => void;
+  showReplyBox?: boolean;
 };
 
-export default function EmailDetailPanel({ email, onClose }: EmailDetailPanelProps) {
+export default function EmailDetailPanel({ email, onClose, showReplyBox = false }: EmailDetailPanelProps) {
   const router = useRouter();
+  const [isReplying, setIsReplying] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  async function handleSendReply(reply: string, tone?: string, attachments?: Attachment[]) {
+    if (!email) return;
+
+    setSending(true);
+    try {
+      // Extract sender email from the "from" field
+      const fromEmail = email.from?.match(/<(.+)>/)?.[1] || email.from;
+      
+      const response = await fetch("/api/gmail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: fromEmail,
+          subject: email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`,
+          message: reply,
+          threadId: email.threadId,
+          messageId: email.messageId,
+          attachments: attachments || [],
+        }),
+      });
+
+      if (response.ok) {
+        alert("Reply sent successfully!");
+        setIsReplying(false);
+      } else {
+        const error = await response.json();
+        alert(`Failed to send reply: ${error.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      console.error("Send reply error:", error);
+      alert("Failed to send reply. Please try again.");
+    } finally {
+      setSending(false);
+    }
+  }
+
   if (!email) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-400">
@@ -55,7 +103,15 @@ export default function EmailDetailPanel({ email, onClose }: EmailDetailPanelPro
           </div>
 
           {/* Action Buttons */}
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex gap-2 flex-wrap">
+            <button
+              onClick={() => setIsReplying(!isReplying)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600/10 hover:bg-green-600/20 border border-green-500/20 hover:border-green-500/40 text-green-400 hover:text-green-300 transition-all text-sm"
+            >
+              <Reply className="w-4 h-4" />
+              {isReplying ? "Hide Reply" : "Reply"}
+            </button>
+            
             <button
               onClick={() => router.push(`/emails/${email.messageId}`)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 hover:border-blue-500/40 text-blue-400 hover:text-blue-300 transition-all text-sm"
@@ -175,6 +231,26 @@ export default function EmailDetailPanel({ email, onClose }: EmailDetailPanelPro
             {body || "No content available"}
           </div>
         </div>
+
+        {/* Reply Box */}
+        {(isReplying || showReplyBox) && (
+          <div className="mb-6">
+            {sending && (
+              <div className="mb-3 p-3 rounded-lg bg-blue-600/10 border border-blue-500/20 text-blue-400 text-sm">
+                Sending reply...
+              </div>
+            )}
+            <SmartReplyBox
+              onSendReply={handleSendReply}
+              suggestions={deepAnalysis?.smartReplies || []}
+              emailContext={{
+                from: from,
+                subject: subject,
+                body: body,
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

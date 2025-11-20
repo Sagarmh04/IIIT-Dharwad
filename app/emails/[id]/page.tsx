@@ -54,9 +54,39 @@ export default function EmailDetailPage() {
     return () => unsub();
   }, [user, messageId]);
 
-  async function handleSendReply(reply: string, tone?: string) {
-    console.log("Sending reply:", reply, "with tone:", tone);
-    alert("Reply sent! (not implemented yet)");
+  async function handleSendReply(reply: string, tone?: string, attachments?: any[]) {
+    if (!email) return;
+
+    try {
+      // Extract sender email from the "from" field
+      const fromEmail = email.from?.match(/<(.+)>/)?.[1] || email.from;
+      
+      const response = await fetch("/api/gmail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: fromEmail,
+          subject: email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`,
+          message: reply,
+          threadId: email.threadId,
+          messageId: email.messageId,
+          attachments: attachments || [],
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert("Reply sent successfully!");
+        console.log("Reply sent:", result);
+      } else {
+        const error = await response.json();
+        console.error("Send error:", error);
+        alert(`Failed to send reply: ${error.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      console.error("Send reply error:", error);
+      alert("Failed to send reply. Please try again.");
+    }
   }
 
   if (loading) {
@@ -89,18 +119,9 @@ export default function EmailDetailPage() {
 
         <div className="flex gap-6">
           <div className="flex-1">
-            <EmailDetailPanel email={email} />
+            <EmailDetailPanel email={email} showReplyBox={true} />
           </div>
         </div>
-
-        {email.deepAnalysis && (
-          <div className="mt-6">
-            <SmartReplyBox
-              onSendReply={handleSendReply}
-              suggestions={email.deepAnalysis?.smartReplies || []}
-            />
-          </div>
-        )}
 
         {email.threadId && (
           <div className="mt-6">

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
 import { collection, query, where, onSnapshot, orderBy, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { formatDistanceToNow } from "date-fns";
+import SmartReplyBox from "@/components/SmartReplyBox";
 
 type EmailData = {
   messageId: string;
@@ -29,6 +30,8 @@ export default function ThreadPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [threadAnalysis, setThreadAnalysis] = useState<any>(null);
   const [hasCheckedAnalysis, setHasCheckedAnalysis] = useState(false);
+  const [showReplyBox, setShowReplyBox] = useState(false);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     async function fetchUser() {
@@ -94,6 +97,42 @@ export default function ThreadPage() {
       console.error("Error checking existing analysis:", error);
       // If check fails, try to analyze
       analyzeThread(emailsData);
+    }
+  }
+
+  async function handleSendReply(reply: string, tone?: string, attachments?: any[]) {
+    if (!user || emails.length === 0) return;
+
+    setSending(true);
+    try {
+      const latestEmail = emails[emails.length - 1];
+      const fromEmail = latestEmail.from?.match(/<(.+)>/)?.[1] || latestEmail.from;
+      
+      const response = await fetch("/api/gmail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: fromEmail,
+          subject: latestEmail.subject.startsWith("Re:") ? latestEmail.subject : `Re: ${latestEmail.subject}`,
+          message: reply,
+          threadId: threadId,
+          messageId: latestEmail.messageId,
+          attachments: attachments || [],
+        }),
+      });
+
+      if (response.ok) {
+        alert("Reply sent successfully!");
+        setShowReplyBox(false);
+      } else {
+        const error = await response.json();
+        alert(`Failed to send reply: ${error.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      console.error("Send reply error:", error);
+      alert("Failed to send reply. Please try again.");
+    } finally {
+      setSending(false);
     }
   }
 
@@ -269,7 +308,7 @@ export default function ThreadPage() {
             <div className="space-y-3">
               {threadAnalysis.timeline.map((item: any, idx: number) => (
                 <div key={idx} className="flex items-center gap-3 p-2 rounded hover:bg-white/5 transition-colors">
-                  <div className={`w-3 h-3 rounded-full flex-shrink-0 ${
+                  <div className={`w-3 h-3 rounded-full shrink-0 ${
                     item.sentiment === "positive" ? "bg-green-500" :
                     item.sentiment === "negative" ? "bg-red-500" : "bg-gray-500"
                   }`} />
@@ -284,6 +323,35 @@ export default function ThreadPage() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Reply Box */}
+        <div className="mb-6">
+          <button
+            onClick={() => setShowReplyBox(!showReplyBox)}
+            className="px-4 py-2 rounded-lg bg-green-600/10 hover:bg-green-600/20 border border-green-500/20 hover:border-green-500/40 text-green-400 hover:text-green-300 transition-all text-sm"
+          >
+            {showReplyBox ? "Hide Reply" : "Reply to Thread"}
+          </button>
+        </div>
+
+        {showReplyBox && (
+          <div className="mb-6 p-6 rounded-lg bg-[#0b0b0e] border border-white/10">
+            {sending && (
+              <div className="mb-3 p-3 rounded-lg bg-blue-600/10 border border-blue-500/20 text-blue-400 text-sm">
+                Sending reply...
+              </div>
+            )}
+            <SmartReplyBox
+              onSendReply={handleSendReply}
+              suggestions={latestEmail?.deepAnalysis?.smartReplies || []}
+              emailContext={{
+                from: latestEmail?.from,
+                subject: latestEmail?.subject || "",
+                body: latestEmail?.body,
+              }}
+            />
           </div>
         )}
 
